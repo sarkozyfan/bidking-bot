@@ -1,59 +1,58 @@
 # BidKing Fresh Bot
 
-A Windows desktop automation toolkit for the PC game **BidKing / 竞拍之王**.
+`BidKing Fresh Bot` 是一个面向 Windows 桌面端《竞拍之王 / BidKing》的 OCR 识别与自动化工具。
 
-This project focuses on a practical desktop workflow:
+这个项目的目标很直接：
 
-- OCR the central information area
-- parse auction facts into structured inputs
-- compute a recommended bid
-- interact with the game window using calibrated coordinates
+- 识别游戏中央信息区
+- 将 OCR 文本解析成结构化拍卖信息
+- 根据可配置的价格模型计算建议出价
+- 按照校准后的窗口坐标完成道具、出价、确认、回合切换等操作
 
-It also includes a small GUI for day-to-day use, so the bot can be configured without manually editing JSON every round.
+项目同时提供了一个图形界面，方便日常使用时直接修改参数，而不是每次手动改 JSON。
 
-## What It Can Do
+## 主要功能
 
-- Full-window OCR polling for round detection and state transitions
-- Central-info parsing into structured auction facts
-- Automatic bid calculation from configurable per-grid prices
-- Automatic tool usage on configured rounds
-- Automatic map entry and round-loop automation
-- End-of-round transition handling
-- Reward / continue screen handling
-- Foreground recovery and startup centering of the game window
-- Stop button with immediate stop request behavior
+- 整窗 OCR 轮询，识别当前回合与界面状态
+- 解析中央信息区文本并提取拍卖条件
+- 根据可配置的单格价格自动计算建议出价
+- 按设定回合自动使用道具
+- 自动选择地图并循环多轮运行
+- 处理“对局结束”、“奖励继续”等过渡界面
+- 启动时自动把游戏窗口拉到前台并居中，减少识别和输入失败
+- GUI 停止按钮支持立即请求停止
 
-## Included Components
+## 项目结构
 
 - `bidking_fresh_bot/bidking_gui.py`
-  - Tkinter GUI launcher
+  - 图形界面启动器
 - `bidking_fresh_bot/fresh_bidking_bot.py`
-  - main OCR + automation loop
+  - 主自动化循环
 - `bidking_fresh_bot/config.json`
-  - runtime automation configuration
+  - 自动化运行配置
 - `bidking_fresh_bot/price_config.json`
-  - price model configuration
+  - 单格价格与价格模型配置
 - `manual_bidking_advisor.py`
-  - pricing / recommendation engine
+  - 价格计算与建议逻辑
 - `bidking_maa_test/central_info_parser.py`
-  - OCR text parser
+  - OCR 文本解析器
 - `bidking_maa_test/window_backend.py`
-  - Win32 capture and window utilities
+  - Win32 窗口截图与窗口工具
 - `bidking_maa_test/analyze_screenshot.py`
-  - ROI-based screenshot analysis helper
+  - 基于 ROI 的截图分析工具
 - `bidking_maa_test/roi_config.json`
-  - ROI definitions
+  - ROI 区域配置
 
-## System Requirements
+## 运行环境
 
-- Windows 10 or Windows 11
-- Python 3.11 or 3.12 recommended
-- Desktop game client workflow
-- 1920x1080 layout recommended for easiest calibration reuse
+- Windows 10 / Windows 11
+- Python 3.11 或 3.12
+- 桌面端游戏窗口
+- 推荐使用 1920x1080 布局，便于复用默认坐标
 
-## Install
+## 安装依赖
 
-Create a virtual environment and install dependencies:
+建议使用虚拟环境：
 
 ```powershell
 python -m venv .venv
@@ -61,85 +60,86 @@ python -m venv .venv
 python -m pip install -r .\requirements.txt
 ```
 
-## Run From Source
+## 从源码运行
 
-Launch the GUI:
+启动图形界面：
 
 ```powershell
 cd .\bidking_fresh_bot
 python .\bidking_gui.py
 ```
 
-Or use the helper script:
+也可以使用附带脚本：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\bidking_fresh_bot\start.ps1
 ```
 
-## Build EXE
+## 打包 EXE
 
-The repository includes a PyInstaller build script:
+仓库中已经附带 PyInstaller 打包脚本：
 
 ```powershell
 cd .\bidking_fresh_bot
 powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
 ```
 
-If successful, the packaged executable will be generated under:
+打包成功后，默认输出位置为：
 
 ```text
 bidking_fresh_bot\dist\BidKingFreshBot_release.exe
 ```
 
-## Configuration
+## 配置说明
 
-Main configuration files:
+主要配置文件：
 
 - `bidking_fresh_bot/config.json`
 - `bidking_fresh_bot/price_config.json`
 
-Typical values you may want to edit:
+通常需要根据自己的环境调整这些内容：
 
-- game window title match rules
-- round timings
-- click coordinates
-- tool usage rounds
-- map selection points
-- fallback bid price
-- per-quality grid prices
+- 游戏窗口标题匹配规则
+- 点击坐标
+- 地图入口坐标
+- 哪些回合使用道具
+- 轮询与等待时间
+- 保底出价
+- 各品质单格价格
 
-## Typical Workflow
+## 基本使用流程
 
-1. Open the game and enter the normal desktop client.
-2. Make sure the game window title matches the `title_keyword` in `config.json`.
-3. Adjust coordinates in `config.json` if your layout differs.
-4. Launch the GUI.
-5. Set prices, map, run count, and risk mode.
-6. Start the bot.
+1. 打开游戏并进入桌面端窗口。
+2. 确认游戏窗口标题与 `config.json` 中的 `title_keyword` 匹配。
+3. 如果你的布局不同，先校准 `config.json` 内坐标。
+4. 启动 GUI。
+5. 设置单格价格、地图、轮次和激进度。
+6. 点击开始运行。
 
-## Open-Source Release Notes
+## 适合开源发布的说明
 
-This repository is prepared as a source release:
+当前仓库已经按源码发布做过整理：
 
-- local build outputs are excluded
-- runtime caches are excluded
-- machine-specific package paths were removed from the release version of the build script
+- 不包含本地构建产物
+- 不包含运行缓存目录
+- 不包含你本机固定 Python 安装路径
+- 构建脚本已改为自动查找 `rapidocr_onnxruntime` 安装位置
 
-## Warnings
+## 注意事项
 
-- This project is for educational and personal automation research.
-- Game updates may break OCR assumptions, ROI layout, or click coordinates.
-- You are responsible for checking whether using automation is acceptable in your own environment.
+- 本项目仅用于学习、研究与个人自动化实验。
+- 游戏更新可能会导致 OCR、ROI 或点击坐标失效，需要重新校准。
+- 请自行确认在你的使用环境中运行自动化工具是否合适。
 
-## Development Notes
+## 开发风格说明
 
-The current implementation is intentionally practical rather than abstract:
+这个项目当前更偏“实用型脚本工程”，而不是高度抽象的通用框架：
 
-- OCR and parsing are optimized around a specific desktop workflow
-- much of the automation logic is coordinate-driven
-- configuration is designed for quick iteration instead of large framework complexity
+- OCR 与解析逻辑围绕特定桌面流程设计
+- 自动化部分较依赖窗口坐标与界面结构
+- 配置优先追求可快速迭代，而不是复杂封装
 
-## Repository Structure
+## 仓库目录示意
 
 ```text
 bidking_open_source/
@@ -162,6 +162,6 @@ bidking_open_source/
     roi_config.json
 ```
 
-## License
+## 许可证
 
-This project is released under the MIT License. See [LICENSE](./LICENSE).
+本项目使用 MIT License 开源，详见 [LICENSE](./LICENSE)。
