@@ -1,0 +1,227 @@
+{
+  "safety": {
+    "dry_run": false,
+    "failsafe": true,
+    "bring_window_to_front": true,
+    "move_pause_seconds": 0.08,
+    "confirm_after_type": true
+  },
+  "window": {
+    "title_keyword": "BidKing",
+    "title_regex": "",
+    "process_name": "",
+    "hwnd": 0,
+    "center_on_start": true,
+    "force_topmost_bump": true,
+    "reference_client_size": {
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "capture": {
+    "mode": "window_client",
+    "central_info_region": {
+      "left": 490,
+      "top": 64,
+      "width": 724,
+      "height": 662
+    },
+    "home_bid_button_region": {
+      "left": 1400,
+      "top": 880,
+      "width": 520,
+      "height": 190
+    },
+    "end_prompt_regions": [
+      {
+        "name": "left_end_title",
+        "left": 60,
+        "top": 100,
+        "width": 590,
+        "height": 160
+      },
+      {
+        "name": "bottom_continue",
+        "left": 650,
+        "top": 940,
+        "width": 470,
+        "height": 140
+      }
+    ]
+  },
+  "ocr": {
+    "provider": "rapidocr",
+    "endpoint": "",
+    "method": "POST",
+    "timeout_seconds": 20,
+    "headers": {},
+    "image_field": "image_base64",
+    "response_text_path": "text",
+    "preprocess_scale": 2.0
+  },
+  "advisor": {
+    "round": 1,
+    "role": "ahmed",
+    "green_count": 0,
+    "white_count": 0,
+    "avg_grid_all": null,
+    "total_grid_rounding": "round",
+    "price_config_path": "price_config.json"
+  },
+  "pricing": {
+    "source": "recommended_cap",
+    "computed_price_unit": "w",
+    "computed_price_multiplier": 10000,
+    "rounding": "floor_int",
+    "fallback_bid_price": 22223,
+    "min_useful_facts": 1
+  },
+  "automation": {
+    "tool_rounds": [
+      1,
+      2
+    ],
+    "default_map": "4",
+    "default_runs": 1,
+    "unknown_escape_cooldown_seconds": 2.0,
+    "maps": {
+      "1": {
+        "name": "快递盲盒堆",
+        "point": {
+          "origin": "left_bottom",
+          "x": 464,
+          "y": 710
+        }
+      },
+      "2": {
+        "name": "废弃仓库",
+        "point": {
+          "origin": "left_bottom",
+          "x": 922,
+          "y": 764
+        }
+      },
+      "3": {
+        "name": "深海沉船",
+        "point": {
+          "origin": "left_bottom",
+          "x": 1597,
+          "y": 620
+        }
+      },
+      "4": {
+        "name": "沉船密封舱",
+        "point": {
+          "origin": "left_bottom",
+          "x": 1634,
+          "y": 413
+        }
+      },
+      "5": {
+        "name": "航运集装箱",
+        "point": {
+          "origin": "left_bottom",
+          "x": 557,
+          "y": 400
+        }
+      },
+      "6": {
+        "name": "空置别墅",
+        "point": {
+          "origin": "left_bottom",
+          "x": 1202,
+          "y": 440
+        }
+      },
+      "7": {
+        "name": "幽静别墅",
+        "point": {
+          "origin": "left_bottom",
+          "x": 1489,
+          "y": 240
+        }
+      }
+    },
+    "selected_map": "4",
+    "selected_runs": 1
+  },
+  "timing": {
+    "poll_seconds": 0.5,
+    "round_detect_wait_seconds": 7.0,
+    "round1_extra_wait_seconds": 3.0,
+    "tool_after_wait_seconds": 3.0,
+    "click_pause_seconds": 0.12,
+    "after_bid_confirm_wait_seconds": 1.0,
+    "transition_debounce_seconds": 8.0,
+    "reward_continue_debounce_seconds": 1.0
+  },
+  "clicks": {
+    "tool_button": {
+      "x": 630,
+      "y": 970
+    },
+    "leftmost_tool": {
+      "x": 290,
+      "y": 960
+    },
+    "tool_confirm": {
+      "x": 1190,
+      "y": 655
+    },
+    "bid_button": {
+      "x": 862,
+      "y": 972
+    },
+    "bid_input_box": {
+      "x": 1046,
+      "y": 865
+    },
+    "bid_confirm": {
+      "x": 1057,
+      "y": 988
+    },
+    "end_reward_click": {
+      "origin": "left_bottom",
+      "x": 980,
+      "y": 540
+    },
+    "end_close_click": {
+      "origin": "left_bottom",
+      "x": 1355,
+      "y": 96
+    },
+    "continue_button": {
+      "origin": "left_bottom",
+      "x": 903,
+      "y": 70
+    },
+    "post_continue_action": {
+      "origin": "left_bottom",
+      "x": 1634,
+      "y": 413
+    },
+    "post_continue_confirm": {
+      "origin": "left_bottom",
+      "x": 1658,
+      "y": 85
+    },
+    "home_bid_button": {
+      "origin": "left_bottom",
+      "x": 1634,
+      "y": 139
+    },
+    "reward_continue_button": {
+      "origin": "left_bottom",
+      "x": 996,
+      "y": 90
+    }
+  },
+  "debug": {
+    "save_crops": false,
+    "save_ocr_text": false,
+    "print_ocr_snippet": false,
+    "save_round_debug": true,
+    "print_round_debug": true,
+    "runs_dir": "runs"
+  }
+}

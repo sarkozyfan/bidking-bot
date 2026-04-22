@@ -1,0 +1,112 @@
+{
+  "reference_resolution": {
+    "width": 1924,
+    "height": 1127
+  },
+  "rois": {
+    "round_banner": {
+      "x": 644,
+      "y": 124,
+      "width": 354,
+      "height": 39
+    },
+    "center_info_panel": {
+      "x": 496,
+      "y": 171,
+      "width": 653,
+      "height": 605
+    },
+    "loot_panel": {
+      "x": 1298,
+      "y": 142,
+      "width": 604,
+      "height": 839
+    },
+    "loot_price_text": {
+      "x": 1452,
+      "y": 949,
+      "width": 329,
+      "height": 35
+    },
+    "main_bid_button": {
+      "x": 701,
+      "y": 976,
+      "width": 321,
+      "height": 78
+    },
+    "main_bid_button_center": {
+      "x": 861,
+      "y": 1015
+    },
+    "tool_button": {
+      "x": 581,
+      "y": 978,
+      "width": 103,
+      "height": 104
+    },
+    "tool_strip_panel": {
+      "x": 25,
+      "y": 931,
+      "width": 1845,
+      "height": 150
+    },
+    "bid_overlay_panel": {
+      "x": 0,
+      "y": 716,
+      "width": 1396,
+      "height": 397
+    },
+    "bid_overlay_keypad": {
+      "x": 31,
+      "y": 768,
+      "width": 692,
+      "height": 324
+    },
+    "bid_input_box": {
+      "x": 780,
+      "y": 840,
+      "width": 536,
+      "height": 140
+    },
+    "confirm_bid_button": {
+      "x": 897,
+      "y": 1002,
+      "width": 325,
+      "height": 63
+    },
+    "confirm_bid_button_center": {
+      "x": 1059,
+      "y": 1033
+    },
+    "bid_overlay_close_button": {
+      "x": 1409,
+      "y": 1051,
+      "width": 61,
+      "height": 56
+    },
+    "reveal_overlay_panel": {
+      "x": 243,
+      "y": 242,
+      "width": 1258,
+      "height": 644
+    },
+    "reveal_title": {
+      "x": 584,
+      "y": 278,
+      "width": 575,
+      "height": 59
+    },
+    "reveal_cards_area": {
+      "x": 348,
+      "y": 462,
+      "width": 779,
+      "height": 359
+    },
+    "reveal_right_info": {
+      "x": 1176,
+      "y": 484,
+      "width": 200,
+      "height": 194
+    }
+  }
+}
