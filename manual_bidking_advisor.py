@@ -30,6 +30,7 @@ CONSERVATIVE = {
     "orangeGrid": 1.0,
     "purpleGrid": 0.2,
     "redGridMin": 3.6,
+    "redGridMax": 6.0,
 }
 
 GLOBAL_EXACT = {
@@ -59,6 +60,7 @@ LEGACY_GRID_PRICE_MODES = {
 COLOR_LABELS = {"blue": "蓝色", "purple": "紫色", "gold": "橙色", "red": "红色"}
 FIELD_LABELS = {
     "total_all": "总藏品数",
+    "victor_total_all": "维克托紫橙红总件数",
     "total_grid_all": "全部总格子数",
     "count_green": "绿色数量",
     "count_white": "白色数量",
@@ -78,11 +80,18 @@ FIELD_LABELS = {
     "avg_gold": "橙色平均格子",
     "avg_red": "红色平均格子",
 }
-ROLE_LABELS = {"ahmed": "艾哈迈德", "raven": "拉文", "none": "未知/通用"}
-ROLE_ALIASES = {"role2": "ahmed", "role3": "raven"}
+ROLE_LABELS = {"ahmad": "艾哈迈德", "lavin": "拉文", "victor": "维克托", "none": "未知/通用"}
+ROLE_ALIASES = {
+    "ahmed": "ahmad",
+    "role2": "ahmad",
+    "raven": "lavin",
+    "role3": "lavin",
+    "weiketu": "victor",
+}
 ROLE_AUTO_FIELDS = {
-    "ahmed": {1: ["total_all"], 2: ["avg_gold"], 3: ["avg_purple"], 4: ["avg_blue"], 5: ["wg_total"]},
-    "raven": {5: ["count_blue", "count_purple", "count_gold", "count_red", "wg_total"]},
+    "ahmad": {1: ["total_all"], 2: ["avg_gold"], 3: ["avg_purple"], 4: ["avg_blue"], 5: ["wg_total"]},
+    "lavin": {5: ["count_blue", "count_purple", "count_gold", "count_red", "wg_total"]},
+    "victor": {1: ["total_all"]},
 }
 ROUND_RULES = {
     1: {"multiplier": 2.0, "pace": 0.42, "label": "两倍出价第二直接获得"},
@@ -180,12 +189,39 @@ def resolve_grid_prices(data: dict) -> Dict[str, float]:
     return prices
 
 
+def raw_price_to_w(value: object) -> Optional[float]:
+    number = as_non_neg_float(value)
+    if number is None:
+        return None
+    return number / 10000.0
+
+
+def get_market_price_info(data: dict) -> Dict[str, Dict[str, Optional[float]]]:
+    info = dict(data.get("market_prices", {}))
+    result: Dict[str, Dict[str, Optional[float]]] = {}
+    for color in ("white", "green", "wg", "blue", "purple", "gold", "red"):
+        color_info = dict(info.get(color, {}))
+        avg = color_info.get("avg", data.get(f"avg_price_{color}"))
+        total = color_info.get("total", data.get(f"total_price_{color}"))
+        result[color] = {"avg": raw_price_to_w(avg), "total": raw_price_to_w(total)}
+    return result
+
+
+def known_color_price(info: Dict[str, Optional[float]], count: int) -> Optional[float]:
+    if info.get("total") is not None:
+        return info["total"]
+    if info.get("avg") is not None:
+        return info["avg"] * count
+    return None
+
+
 def avg_match(grid: int, count: int, avg: Optional[float], tolerance: float) -> bool:
     if avg is None:
         return True
+    key = math.floor(avg * 100 + 1e-9)
     if count == 0:
-        return grid == 0 and avg <= tolerance
-    return abs((grid / count) - avg) <= tolerance + 1e-9
+        return grid == 0 and key == 0
+    return math.floor((grid * 100) / count + 1e-9) == key
 
 
 def uniq_sorted(values: Iterable) -> List:
@@ -295,7 +331,8 @@ def derive_total_grid_all(data: dict) -> Optional[int]:
     direct = as_non_neg_int(data.get("total_grid_all"))
     if direct is not None:
         return direct
-    total_all = as_non_neg_int(data.get("total_all"))
+    role = normalize_role(data.get("my_role", "none"))
+    total_all = as_non_neg_int(data.get("victor_total_all")) if role == "victor" else as_non_neg_int(data.get("total_all"))
     avg_grid_all = as_non_neg_float(data.get("avg_grid_all"))
     if total_all is None or avg_grid_all is None:
         return None
@@ -346,36 +383,96 @@ def enumerate_green_white_splits(data: dict, wg_total: int) -> List[Tuple[int, i
     return splits
 
 
-def estimate_combo(combo: dict, weighted: Dict[str, float], grid_prices: Dict[str, float]) -> Dict[str, float]:
-    blue_min, blue_max = combo["ranges"]["blue"]
+def estimate_combo(combo: dict, weighted: Dict[str, float], price_info: Dict[str, Dict[str, Optional[float]]]) -> Dict[str, float]:
+    blue_min, blue_max = combo["ranges"].get("blue", (0, 0))
     purple_min, purple_max = combo["ranges"]["purple"]
     gold_min, gold_max = combo["ranges"]["gold"]
     red_min, red_max = combo["ranges"]["red"]
-    green_count = combo["green"]
-    white_count = combo["white"]
 
-    item_cons = combo["gold"] * CONSERVATIVE["orangeItem"] + combo["red"] * CONSERVATIVE["redItem"]
-    item_exact = combo["purple"] * GLOBAL_EXACT["purpleItem"] + combo["gold"] * GLOBAL_EXACT["orangeItem"] + combo["red"] * GLOBAL_EXACT["redItem"]
-    item_scene = combo["purple"] * weighted["purpleItem"] + combo["gold"] * weighted["orangeItem"] + combo["red"] * weighted["redItem"]
+    base = {
+        "purpleItemExact": combo["purple"] * GLOBAL_EXACT["purpleItem"],
+        "purpleItemScene": combo["purple"] * weighted["purpleItem"],
+        "goldItemCons": combo["gold"] * CONSERVATIVE["orangeItem"],
+        "goldItemExact": combo["gold"] * GLOBAL_EXACT["orangeItem"],
+        "goldItemScene": combo["gold"] * weighted["orangeItem"],
+        "redItemCons": combo["red"] * CONSERVATIVE["redItem"],
+        "redItemExact": combo["red"] * GLOBAL_EXACT["redItem"],
+        "redItemScene": combo["red"] * weighted["redItem"],
+        "purpleGridConsMin": purple_min * CONSERVATIVE["purpleGrid"],
+        "purpleGridConsMax": purple_max * CONSERVATIVE["purpleGrid"],
+        "purpleGridExactMin": purple_min * GLOBAL_EXACT["purpleGrid"],
+        "purpleGridExactMax": purple_max * GLOBAL_EXACT["purpleGrid"],
+        "purpleGridSceneMin": purple_min * weighted["purpleGrid"],
+        "purpleGridSceneMax": purple_max * weighted["purpleGrid"],
+        "goldGridConsMin": gold_min * CONSERVATIVE["orangeGrid"],
+        "goldGridConsMax": gold_max * CONSERVATIVE["orangeGrid"],
+        "goldGridExactMin": gold_min * GLOBAL_EXACT["orangeGrid"],
+        "goldGridExactMax": gold_max * GLOBAL_EXACT["orangeGrid"],
+        "goldGridSceneMin": gold_min * weighted["orangeGridMin"],
+        "goldGridSceneMax": gold_max * weighted["orangeGridMax"],
+        "redGridConsMin": red_min * CONSERVATIVE["redGridMin"],
+        "redGridConsMax": red_max * CONSERVATIVE.get("redGridMax", CONSERVATIVE["redGridMin"]),
+        "redGridExactMin": red_min * GLOBAL_EXACT["redGridMin"],
+        "redGridExactMax": red_max * GLOBAL_EXACT["redGridMax"],
+        "redGridSceneMin": red_min * weighted["redGridMin"],
+        "redGridSceneMax": red_max * weighted["redGridMax"],
+    }
+    out = {
+        "itemCons": base["goldItemCons"] + base["redItemCons"],
+        "itemExact": base["purpleItemExact"] + base["goldItemExact"] + base["redItemExact"],
+        "itemScene": base["purpleItemScene"] + base["goldItemScene"] + base["redItemScene"],
+        "gridConsMin": base["goldGridConsMin"] + base["purpleGridConsMin"] + base["redGridConsMin"],
+        "gridConsMax": base["goldGridConsMax"] + base["purpleGridConsMax"] + base["redGridConsMax"],
+        "gridExactMin": base["goldGridExactMin"] + base["purpleGridExactMin"] + base["redGridExactMin"],
+        "gridExactMax": base["goldGridExactMax"] + base["purpleGridExactMax"] + base["redGridExactMax"],
+        "gridSceneMin": base["goldGridSceneMin"] + base["purpleGridSceneMin"] + base["redGridSceneMin"],
+        "gridSceneMax": base["goldGridSceneMax"] + base["purpleGridSceneMax"] + base["redGridSceneMax"],
+    }
 
-    green_white_value = green_count * grid_prices["green"] + white_count * grid_prices["white"]
-    grid_cons_min = blue_min * grid_prices["blue"] + purple_min * grid_prices["purple"] + gold_min * grid_prices["gold"] + red_min * grid_prices["red"] + green_white_value
-    grid_exact_min = grid_cons_min
-    grid_exact_max = blue_max * grid_prices["blue"] + purple_max * grid_prices["purple"] + gold_max * grid_prices["gold"] + red_max * grid_prices["red"] + green_white_value
-    grid_scene_min = grid_cons_min
-    grid_scene_max = grid_exact_max
+    known = {
+        "wg": known_color_price(price_info["wg"], combo.get("wg_total", 0)),
+        "blue": known_color_price(price_info["blue"], combo.get("blue", 0)),
+        "purple": known_color_price(price_info["purple"], combo.get("purple", 0)),
+        "gold": known_color_price(price_info["gold"], combo.get("gold", 0)),
+        "red": known_color_price(price_info["red"], combo.get("red", 0)),
+    }
+    extra_fixed = (known["wg"] or 0.0) + (known["blue"] or 0.0)
+    for key in ("itemCons", "itemExact", "itemScene", "gridConsMin", "gridConsMax", "gridExactMin", "gridExactMax", "gridSceneMin", "gridSceneMax"):
+        out[key] += extra_fixed
+    if known["purple"] is not None:
+        out["itemExact"] = out["itemExact"] - base["purpleItemExact"] + known["purple"]
+        out["itemScene"] = out["itemScene"] - base["purpleItemScene"] + known["purple"]
+        for key in ("gridConsMin", "gridConsMax", "gridExactMin", "gridExactMax", "gridSceneMin", "gridSceneMax"):
+            base_key = key.replace("grid", "purpleGrid", 1)
+            out[key] = out[key] - base[base_key] + known["purple"]
+    if known["gold"] is not None:
+        out["itemCons"] = out["itemCons"] - base["goldItemCons"] + known["gold"]
+        out["itemExact"] = out["itemExact"] - base["goldItemExact"] + known["gold"]
+        out["itemScene"] = out["itemScene"] - base["goldItemScene"] + known["gold"]
+        for key in ("gridConsMin", "gridConsMax", "gridExactMin", "gridExactMax", "gridSceneMin", "gridSceneMax"):
+            base_key = key.replace("grid", "goldGrid", 1)
+            out[key] = out[key] - base[base_key] + known["gold"]
+    if known["red"] is not None:
+        out["itemCons"] = out["itemCons"] - base["redItemCons"] + known["red"]
+        out["itemExact"] = out["itemExact"] - base["redItemExact"] + known["red"]
+        out["itemScene"] = out["itemScene"] - base["redItemScene"] + known["red"]
+        for key in ("gridConsMin", "gridConsMax", "gridExactMin", "gridExactMax", "gridSceneMin", "gridSceneMax"):
+            base_key = key.replace("grid", "redGrid", 1)
+            out[key] = out[key] - base[base_key] + known["red"]
 
-    conservative_floor = min(item_cons, grid_cons_min)
-    exact_floor = min(item_exact, grid_exact_min)
-    raw_aggressive_ceiling = max(item_exact, grid_exact_max, item_scene, grid_scene_max)
+    conservative_floor = min(out["itemCons"], out["gridConsMin"])
+    exact_floor = min(out["itemExact"], out["gridExactMin"])
+    raw_aggressive_ceiling = max(out["itemExact"], out["gridExactMax"], out["itemScene"], out["gridSceneMax"])
 
     return {
         "conservative_floor": conservative_floor,
         "exact_floor": exact_floor,
-        "item_exact": item_exact,
-        "item_scene": item_scene,
-        "grid_exact_min": grid_exact_min,
-        "grid_scene_min": grid_scene_min,
+        "item_cons": out["itemCons"],
+        "item_exact": out["itemExact"],
+        "item_scene": out["itemScene"],
+        "grid_cons_min": out["gridConsMin"],
+        "grid_exact_min": out["gridExactMin"],
+        "grid_scene_min": out["gridSceneMin"],
         "raw_aggressive_ceiling": raw_aggressive_ceiling,
         "possible_low_price": min(conservative_floor, exact_floor),
         "possible_high_price": raw_aggressive_ceiling,
@@ -402,7 +499,8 @@ def percentile(values: List[float], ratio: float) -> float:
 
 
 def enumerate_high_totals(data: dict) -> List[Tuple[int, int]]:
-    total_all = as_non_neg_int(data.get("total_all"))
+    role = normalize_role(data.get("my_role", "none"))
+    total_all = as_non_neg_int(data.get("victor_total_all")) if role == "victor" else as_non_neg_int(data.get("total_all"))
     wg_total = green_white_total(data)
     wg_min_total = green_white_min_total(data)
     if total_all is None:
@@ -426,6 +524,193 @@ def enumerate_high_totals(data: dict) -> List[Tuple[int, int]]:
     return [(total_all - candidate_wg, candidate_wg) for candidate_wg in range(wg_min_total, total_all + 1)]
 
 
+def get_wg_constraint(data: dict) -> ColorConstraint:
+    color_data = dict(data.get("constraints", {}).get("wg", {}))
+    direct = green_white_total(data)
+    return ColorConstraint(
+        avg=as_non_neg_float(color_data.get("avg")),
+        count=as_non_neg_int(color_data.get("count")) if color_data.get("count") not in (None, "") else direct,
+        grid=as_non_neg_int(color_data.get("grid")),
+        min_count=green_white_min_total(data) or as_non_neg_int(color_data.get("min_count")),
+    )
+
+
+def empty_solved() -> Dict[str, dict]:
+    return {color: {"counts": [], "pair_map": {}, "warns": []} for color in ("blue", "purple", "gold", "red")}
+
+
+def normalize_solved(solved: Dict[str, dict]) -> Dict[str, dict]:
+    for color in solved:
+        solved[color]["counts"] = uniq_sorted(solved[color]["counts"])
+        solved[color]["warns"] = sorted(set(solved[color]["warns"]))
+        solved[color]["pair_map"] = {count: uniq_sorted(grids) for count, grids in solved[color]["pair_map"].items()}
+    return solved
+
+
+def build_summary(
+    data: dict,
+    estimates: List[dict],
+    combos: List[dict],
+    round_rule: dict,
+    avg_tolerance: float,
+    grid_prices: Dict[str, float],
+) -> dict:
+    floor_price = min(item["est"]["exact_floor"] for item in estimates)
+    conservative_floor = min(item["est"]["conservative_floor"] for item in estimates)
+    avg_price = (
+        min(item["est"]["item_exact"] for item in estimates)
+        + min(item["est"]["grid_exact_min"] for item in estimates)
+        + min(item["est"]["item_scene"] for item in estimates)
+        + min(item["est"]["grid_scene_min"] for item in estimates)
+    ) / 4.0
+    possible_low_price = min(item["est"]["possible_low_price"] for item in estimates)
+    possible_high_price = max(item["est"]["possible_high_price"] for item in estimates)
+    combo_low_values = [item["est"]["exact_floor"] for item in estimates]
+    combo_high_values = [item["est"]["raw_aggressive_ceiling"] for item in estimates]
+    spread = max(0.0, percentile(combo_high_values, 0.9) - percentile(combo_low_values, 0.1))
+    spread_ratio = spread / max(avg_price, 1.0)
+    count_term = min(45.0, math.log2(len(combos) + 1) * 6.5)
+    uncertainty = min(100.0, count_term + spread_ratio * 35.0)
+    wg_candidates = uniq_sorted(combo.get("wg_total", 0) for combo in combos)
+    total_grid_candidates = uniq_sorted(
+        [combo["total_grid_range"][0] for combo in combos if "total_grid_range" in combo]
+        + [combo["total_grid_range"][1] for combo in combos if "total_grid_range" in combo]
+    )
+    return {
+        "combo_count": len(combos),
+        "conservative_floor": conservative_floor,
+        "floor_price": floor_price,
+        "avg_price": avg_price,
+        "conservative_bid_price": floor_price,
+        "balanced_bid_price": avg_price,
+        "aggressive_bid_price": avg_price * 1.25,
+        "possible_low_price": possible_low_price,
+        "possible_high_price": possible_high_price,
+        "uncertainty": uncertainty,
+        "round_rule": round_rule["label"],
+        "avg_tolerance": avg_tolerance,
+        "observed_low_price": as_non_neg_float(data.get("observed_low_price")),
+        "wg_candidates": wg_candidates,
+        "total_grid_candidates": total_grid_candidates,
+        "grid_prices": grid_prices,
+    }
+
+
+def lavin_known_price(price_info: Dict[str, Optional[float]], count: int, default_avg: float) -> float:
+    known = known_color_price(price_info, count)
+    return known if known is not None else count * default_avg
+
+
+def evaluate_lavin(data: dict) -> dict:
+    round_no = max(1, min(5, as_non_neg_int(data.get("round")) or 1))
+    round_rule = ROUND_RULES.get(round_no, ROUND_RULES[5])
+    weighted = weighted_stats(dict(data.get("category_weights", {})))
+    price_info = get_market_price_info(data)
+    grid_prices = resolve_grid_prices(data)
+
+    counts = {
+        "white": as_non_neg_int(data.get("count_white")) or 0,
+        "green": as_non_neg_int(data.get("count_green")) or 0,
+        "blue": get_color_constraint(data, "blue").count or 0,
+        "purple": get_color_constraint(data, "purple").count or 0,
+        "gold": get_color_constraint(data, "gold").count or 0,
+        "red": get_color_constraint(data, "red").count or 0,
+    }
+    grids = {
+        "blue": get_color_constraint(data, "blue").grid,
+        "purple": get_color_constraint(data, "purple").grid,
+        "gold": get_color_constraint(data, "gold").grid,
+        "red": get_color_constraint(data, "red").grid,
+    }
+
+    white_known = lavin_known_price(price_info["white"], counts["white"], 0.03)
+    green_known = lavin_known_price(price_info["green"], counts["green"], 0.09)
+    blue_known = lavin_known_price(price_info["blue"], counts["blue"], 0.31)
+    fixed_low = white_known + green_known + blue_known
+    purple_known = known_color_price(price_info["purple"], counts["purple"])
+    gold_known = known_color_price(price_info["gold"], counts["gold"])
+    red_known = known_color_price(price_info["red"], counts["red"])
+    purple_fallback = counts["purple"] * 0.95
+
+    item_cons = fixed_low + (purple_known if purple_known is not None else purple_fallback) + (gold_known if gold_known is not None else counts["gold"] * CONSERVATIVE["orangeItem"]) + (red_known if red_known is not None else counts["red"] * CONSERVATIVE["redItem"])
+    item_exact = fixed_low + (purple_known if purple_known is not None else purple_fallback) + (gold_known if gold_known is not None else counts["gold"] * GLOBAL_EXACT["orangeItem"]) + (red_known if red_known is not None else counts["red"] * GLOBAL_EXACT["redItem"])
+    item_scene = fixed_low + (purple_known if purple_known is not None else purple_fallback) + (gold_known if gold_known is not None else counts["gold"] * weighted["orangeItem"]) + (red_known if red_known is not None else counts["red"] * weighted["redItem"])
+
+    has_grid = any(grids[color] is not None for color in ("purple", "gold", "red"))
+    if has_grid:
+        purple_grid_cons = purple_known if purple_known is not None else ((grids["purple"] or 0) * CONSERVATIVE["purpleGrid"] if grids["purple"] is not None else purple_fallback)
+        purple_grid_exact = purple_known if purple_known is not None else ((grids["purple"] or 0) * GLOBAL_EXACT["purpleGrid"] if grids["purple"] is not None else purple_fallback)
+        purple_grid_scene = purple_known if purple_known is not None else ((grids["purple"] or 0) * weighted["purpleGrid"] if grids["purple"] is not None else purple_fallback)
+        gold_grid_cons_min = gold_known if gold_known is not None else ((grids["gold"] or 0) * CONSERVATIVE["orangeGrid"] if grids["gold"] is not None else counts["gold"] * CONSERVATIVE["orangeItem"])
+        gold_grid_cons_max = gold_grid_cons_min
+        gold_grid_exact_min = gold_known if gold_known is not None else ((grids["gold"] or 0) * GLOBAL_EXACT["orangeGrid"] if grids["gold"] is not None else counts["gold"] * GLOBAL_EXACT["orangeItem"])
+        gold_grid_exact_max = gold_grid_exact_min
+        gold_grid_scene_min = gold_known if gold_known is not None else ((grids["gold"] or 0) * weighted["orangeGridMin"] if grids["gold"] is not None else counts["gold"] * weighted["orangeItem"])
+        gold_grid_scene_max = gold_known if gold_known is not None else ((grids["gold"] or 0) * weighted["orangeGridMax"] if grids["gold"] is not None else counts["gold"] * weighted["orangeItem"])
+        red_grid_cons_min = red_known if red_known is not None else ((grids["red"] or 0) * CONSERVATIVE["redGridMin"] if grids["red"] is not None else counts["red"] * CONSERVATIVE["redItem"])
+        red_grid_cons_max = red_known if red_known is not None else ((grids["red"] or 0) * CONSERVATIVE.get("redGridMax", CONSERVATIVE["redGridMin"]) if grids["red"] is not None else counts["red"] * CONSERVATIVE["redItem"])
+        red_grid_exact_min = red_known if red_known is not None else ((grids["red"] or 0) * GLOBAL_EXACT["redGridMin"] if grids["red"] is not None else counts["red"] * GLOBAL_EXACT["redItem"])
+        red_grid_exact_max = red_known if red_known is not None else ((grids["red"] or 0) * GLOBAL_EXACT["redGridMax"] if grids["red"] is not None else counts["red"] * GLOBAL_EXACT["redItem"])
+        red_grid_scene_min = red_known if red_known is not None else ((grids["red"] or 0) * weighted["redGridMin"] if grids["red"] is not None else counts["red"] * weighted["redItem"])
+        red_grid_scene_max = red_known if red_known is not None else ((grids["red"] or 0) * weighted["redGridMax"] if grids["red"] is not None else counts["red"] * weighted["redItem"])
+        grid_cons_min = fixed_low + purple_grid_cons + gold_grid_cons_min + red_grid_cons_min
+        grid_cons_max = fixed_low + purple_grid_cons + gold_grid_cons_max + red_grid_cons_max
+        grid_exact_min = fixed_low + purple_grid_exact + gold_grid_exact_min + red_grid_exact_min
+        grid_exact_max = fixed_low + purple_grid_exact + gold_grid_exact_max + red_grid_exact_max
+        grid_scene_min = fixed_low + purple_grid_scene + gold_grid_scene_min + red_grid_scene_min
+        grid_scene_max = fixed_low + purple_grid_scene + gold_grid_scene_max + red_grid_scene_max
+    else:
+        grid_cons_min = grid_cons_max = item_cons
+        grid_exact_min = grid_exact_max = item_exact
+        grid_scene_min = grid_scene_max = item_scene
+
+    est = {
+        "conservative_floor": min(item_cons, grid_cons_min),
+        "exact_floor": min(item_exact, grid_exact_min),
+        "item_exact": item_exact,
+        "item_scene": item_scene,
+        "grid_exact_min": grid_exact_min,
+        "grid_scene_min": grid_scene_min,
+        "raw_aggressive_ceiling": max(item_exact, item_scene, grid_exact_max, grid_scene_max),
+        "possible_low_price": min(item_cons, item_exact, item_scene, grid_cons_min, grid_exact_min, grid_scene_min),
+        "possible_high_price": max(item_cons, item_exact, item_scene, grid_cons_max, grid_exact_max, grid_scene_max),
+    }
+    combo = {
+        "green": counts["green"],
+        "white": counts["white"],
+        "blue": counts["blue"],
+        "purple": counts["purple"],
+        "gold": counts["gold"],
+        "red": counts["red"],
+        "wg_total": counts["green"] + counts["white"],
+        "ranges": {
+            "blue": (grids["blue"] or 0, grids["blue"] or 0),
+            "purple": (grids["purple"] or 0, grids["purple"] or 0),
+            "gold": (grids["gold"] or 0, grids["gold"] or 0),
+            "red": (grids["red"] or 0, grids["red"] or 0),
+        },
+        "total_grid_range": (sum(grid or 0 for grid in grids.values()), sum(grid or 0 for grid in grids.values())),
+    }
+    summary = build_summary(data, [{"combo": combo, "est": est}], [combo], round_rule, as_non_neg_float(data.get("avg_tolerance")) or 0.05, grid_prices)
+    solved = {
+        "blue": {"counts": [counts["blue"]], "pair_map": {counts["blue"]: [grids["blue"] or 0]}, "warns": []},
+        "purple": {"counts": [counts["purple"]], "pair_map": {counts["purple"]: [grids["purple"] or 0]}, "warns": []},
+        "gold": {"counts": [counts["gold"]], "pair_map": {counts["gold"]: [grids["gold"] or 0]}, "warns": []},
+        "red": {"counts": [counts["red"]], "pair_map": {counts["red"]: [grids["red"] or 0]}, "warns": []},
+    }
+    return {
+        "errors": [],
+        "warns": [],
+        "summary": summary,
+        "solved": solved,
+        "combos_preview": [combo],
+        "info_suggestions": compute_info_suggestions(data, solved, 1),
+        "auto_fields_now": fields_known_by_role("lavin", round_no),
+        "role_label": ROLE_LABELS["lavin"],
+        "resolved_wg_total": combo["wg_total"],
+    }
+
+
 def rounds_until_auto(role: str, current_round: int, field: str) -> Optional[int]:
     role_map = ROLE_AUTO_FIELDS.get(normalize_role(role), {})
     for reveal_round, fields in sorted(role_map.items()):
@@ -447,7 +732,7 @@ def compute_info_suggestions(data: dict, solved: dict, combo_count: int) -> List
     current_round = int(data.get("round", 1))
     role = normalize_role(data.get("my_role", "none"))
     suggestions = []
-    total_all = as_non_neg_int(data.get("total_all"))
+    total_all = as_non_neg_int(data.get("victor_total_all")) if role == "victor" else as_non_neg_int(data.get("total_all"))
     total_grid_all = as_non_neg_int(data.get("total_grid_all"))
     high_candidates = enumerate_high_totals(data)
     high_total = max((high for high, _ in high_candidates), default=None)
@@ -455,12 +740,12 @@ def compute_info_suggestions(data: dict, solved: dict, combo_count: int) -> List
     candidate_fields = [
         "count_red", "count_gold", "avg_gold", "grid_red", "count_purple", "avg_purple",
         "grid_gold", "count_green", "count_white", "min_count_green", "min_count_white",
-        "total_grid_all", "total_all", "grid_purple", "avg_blue", "count_blue", "grid_blue",
+        "total_grid_all", "victor_total_all" if role == "victor" else "total_all", "grid_purple", "avg_blue", "count_blue", "grid_blue",
     ]
 
     missing = set()
     if total_all is None:
-        missing.add("total_all")
+        missing.add("victor_total_all" if role == "victor" else "total_all")
     if total_grid_all is None:
         missing.add("total_grid_all")
     if as_non_neg_int(data.get("count_green")) is None:
@@ -526,75 +811,10 @@ def compute_info_suggestions(data: dict, solved: dict, combo_count: int) -> List
     return suggestions[:5]
 
 
-def compute_aggression(data: dict, summary: dict) -> dict:
-    rank_signal = dict(data.get("rank_signal", {}))
-    style = dict(data.get("style", {}))
-    my_rank = as_non_neg_int(rank_signal.get("my_rank")) or 1
-    players = max(2, as_non_neg_int(rank_signal.get("players")) or 4)
-    pressure = max(0.0, min(1.0, float(rank_signal.get("pressure", 0.5))))
-    bluff = max(0.0, min(1.0, float(rank_signal.get("suspected_bluff", 0.2))))
-    need_comeback = bool(style.get("need_comeback", False))
-    risk_bias = str(style.get("risk_bias", "balanced"))
-    round_no = max(1, min(5, as_non_neg_int(data.get("round")) or 1))
-    round_rule = ROUND_RULES.get(round_no, ROUND_RULES[5])
-
-    floor_value = summary["floor_price"]
-    avg_value = summary["avg_price"]
-    burst_value = summary["burst_price"]
-    recommended_cap = summary["recommended_cap"]
-    uncertainty = summary["uncertainty"]
-    combo_count = summary["combo_count"]
-
-    cap_gain = max(0.0, (recommended_cap - avg_value) / max(avg_value, 1.0))
-    burst_gain = max(0.0, (burst_value - avg_value) / max(avg_value, 1.0))
-    safety_factor = max(0.0, (avg_value - floor_value) / max(avg_value, 1.0))
-    rank_pressure = (my_rank - 1) / max(players - 1, 1)
-    uncertainty_penalty = uncertainty / 100.0
-    round_push = {1: -0.16, 2: -0.08, 3: 0.02, 4: 0.14, 5: 0.24}.get(round_no, 0.0)
-    bias_map = {"conservative": -0.35, "balanced": 0.0, "aggressive": 0.35}
-
-    score = 0.0
-    score += cap_gain * 1.25
-    score += burst_gain * 0.25
-    score += safety_factor * 0.22
-    score += rank_pressure * 0.55
-    score += bluff * 0.35
-    score += bias_map.get(risk_bias, 0.0)
-    score += round_push
-    if need_comeback:
-        score += 0.28
-    score -= pressure * (1.0 - bluff) * 0.35
-    score -= uncertainty_penalty * 0.35
-    if combo_count > 1200:
-        score -= 0.18
-
-    if score < -0.08:
-        mode = "保守停手"
-        action = "这轮更像信息不足且外部压力偏大，不建议硬赌。"
-    elif score < 0.22:
-        mode = "试探观察"
-        action = "可以维持存在感，但优先拿信息，不要为排名硬冲。"
-    elif score < 0.58:
-        mode = "积极争夺"
-        action = "这轮可以争，但更适合带着上限意识去争。"
-    else:
-        mode = "高爆发窗口"
-        action = "这轮可以明显更激进，但仍建议围绕本回合建议上限出手。"
-
-    reasons = [
-        f"底价 {format_w(floor_value)}，平均参考 {format_w(avg_value)}，爆发上限 {format_w(burst_value)}",
-        f"第 {round_no} 回合规则是“{round_rule['label']}”，本回合建议上限 {format_w(recommended_cap)}",
-        f"当前排名 {my_rank}/{players}，演你怀疑度 {bluff:.2f}，压力 {pressure:.2f}，不确定性 {uncertainty:.1f}/100",
-    ]
-    if need_comeback:
-        reasons.append("你设置了需要翻盘，系统会主动上调激进倾向")
-
-    return {"score": score, "mode": mode, "action": action, "reasons": reasons}
-
-
 def validate_input(data: dict) -> List[str]:
     warns = []
-    total_all = as_non_neg_int(data.get("total_all"))
+    role = normalize_role(data.get("my_role", "none"))
+    total_all = as_non_neg_int(data.get("victor_total_all")) if role == "victor" else as_non_neg_int(data.get("total_all"))
     total_grid_all = derive_total_grid_all(data)
     wg_total = green_white_total(data)
     green_count = as_non_neg_int(data.get("count_green"))
@@ -611,7 +831,9 @@ def validate_input(data: dict) -> List[str]:
         except Exception as exc:
             warns.append(f"{color} 单格价格输入非法: {exc}")
 
-    if total_all is None:
+    if role == "victor" and total_all is None:
+        warns.append("缺少 victor_total_all（维克托紫橙红总件数）")
+    elif role != "lavin" and total_all is None:
         warns.append("缺少 total_all（总藏品数）")
     if max_count is None or max_count < 1:
         warns.append("max_count 必须是正整数")
@@ -633,7 +855,7 @@ def validate_input(data: dict) -> List[str]:
         warns.append("全部总格子数不能小于总藏品数")
 
     candidates = enumerate_high_totals(data)
-    if not candidates:
+    if role not in ("lavin", "victor") and not candidates:
         warns.append("当前信息不足以确定高品质总数（蓝紫橙红总数）")
 
     for color in ("blue", "purple", "gold", "red"):
@@ -650,6 +872,12 @@ def evaluate(data: dict) -> dict:
     if errors:
         return {"errors": errors, "warns": []}
 
+    role = normalize_role(data.get("my_role", "ahmad"))
+    if role == "none":
+        role = "ahmad"
+    if role == "lavin":
+        return evaluate_lavin(data)
+
     max_count = as_non_neg_int(data.get("max_count")) or 60
     max_show = as_non_neg_int(data.get("max_show")) or 20
     avg_tolerance = as_non_neg_float(data.get("avg_tolerance")) or 0.05
@@ -657,31 +885,48 @@ def evaluate(data: dict) -> dict:
     round_rule = ROUND_RULES.get(round_no, ROUND_RULES[5])
     total_grid_all = derive_total_grid_all(data)
     grid_prices = resolve_grid_prices(data)
+    price_info = get_market_price_info(data)
     constraints = {color: get_color_constraint(data, color) for color in ("blue", "purple", "gold", "red")}
     warns: List[str] = []
 
-    candidates = enumerate_high_totals(data)
-    if not candidates:
-        return {"errors": ["当前信息不足以确定高品质总数（蓝紫橙红总数）"], "warns": warns}
+    total_all = as_non_neg_int(data.get("victor_total_all")) if role == "victor" else as_non_neg_int(data.get("total_all"))
+    if total_all is None:
+        if role == "victor":
+            return {"errors": ["缺少 victor_total_all（维克托紫橙红总件数）"], "warns": warns}
+        return {"errors": ["缺少 total_all（总藏品数）"], "warns": warns}
 
-    solved: Dict[str, dict] = {color: {"counts": [], "pair_map": {}, "warns": []} for color in ("blue", "purple", "gold", "red")}
+    solved: Dict[str, dict] = empty_solved()
     combos = []
     seen_combos = set()
 
-    for high_total, candidate_wg_total in candidates:
-        if high_total < 0:
-            continue
+    if role == "victor":
+        high_cases = [(total_all, 0, None)]
+    else:
+        wg_solution = solve_color("白+绿", get_wg_constraint(data), max_count, total_all, avg_tolerance)
+        warns.extend(wg_solution.warns)
+        high_cases = []
+        for wg_count in wg_solution.counts:
+            high_total = total_all - wg_count
+            if high_total >= 0:
+                high_cases.append((high_total, wg_count, grid_range(wg_solution.pair_map, wg_count)))
+
+    for high_total, candidate_wg_total, wg_range in high_cases:
         local_solved: Dict[str, dict] = {}
-        for color, constraint in constraints.items():
-            solution = solve_color(COLOR_LABELS[color], constraint, max_count, high_total, avg_tolerance)
+        active_colors = ("purple", "gold", "red") if role == "victor" else ("blue", "purple", "gold", "red")
+        for color in active_colors:
+            solution = solve_color(COLOR_LABELS[color], constraints[color], max_count, high_total, avg_tolerance)
             local_solved[color] = {"counts": solution.counts, "pair_map": solution.pair_map, "warns": solution.warns}
             warns.extend(solution.warns)
             solved[color]["counts"].extend(solution.counts)
             solved[color]["warns"].extend(solution.warns)
             for count, grids in solution.pair_map.items():
                 solved[color]["pair_map"].setdefault(count, []).extend(grids)
+        if role == "victor":
+            local_solved["blue"] = {"counts": [0], "pair_map": {0: [0]}, "warns": []}
+            solved["blue"]["counts"].append(0)
+            solved["blue"]["pair_map"].setdefault(0, []).append(0)
 
-        if not local_solved["blue"]["counts"] or not local_solved["purple"]["counts"] or not local_solved["gold"]["counts"]:
+        if not local_solved["purple"]["counts"] or not local_solved["gold"]["counts"] or (role != "victor" and not local_solved["blue"]["counts"]):
             continue
 
         red_count_set = set(local_solved["red"]["counts"])
@@ -694,8 +939,7 @@ def evaluate(data: dict) -> dict:
                         continue
                     if red_restricted and red_count not in red_count_set:
                         continue
-
-                    blue_range = grid_range(local_solved["blue"]["pair_map"], blue_count)
+                    blue_range = (0, 0) if role == "victor" else grid_range(local_solved["blue"]["pair_map"], blue_count)
                     purple_range = grid_range(local_solved["purple"]["pair_map"], purple_count)
                     gold_range = grid_range(local_solved["gold"]["pair_map"], gold_count)
                     red_range = grid_range(local_solved["red"]["pair_map"], red_count)
@@ -703,13 +947,14 @@ def evaluate(data: dict) -> dict:
                         red_range = (0, 0) if red_count == 0 else (red_count, 18 * red_count)
                     if not blue_range or not purple_range or not gold_range:
                         continue
-
-                    total_grid_low = blue_range[0] + purple_range[0] + gold_range[0] + red_range[0] + candidate_wg_total
-                    total_grid_high = blue_range[1] + purple_range[1] + gold_range[1] + red_range[1] + candidate_wg_total
+                    low_wg_grid = wg_range[0] if wg_range else candidate_wg_total
+                    high_wg_grid = wg_range[1] if wg_range else candidate_wg_total
+                    total_grid_low = blue_range[0] + purple_range[0] + gold_range[0] + red_range[0] + low_wg_grid
+                    total_grid_high = blue_range[1] + purple_range[1] + gold_range[1] + red_range[1] + high_wg_grid
                     if total_grid_all is not None and not (total_grid_low <= total_grid_all <= total_grid_high):
                         continue
-
-                    for green_count, white_count in enumerate_green_white_splits(data, candidate_wg_total):
+                    splits = [(0, 0)] if role == "victor" else enumerate_green_white_splits(data, candidate_wg_total)
+                    for green_count, white_count in splits:
                         combo_key = (blue_count, purple_count, gold_count, red_count, green_count, white_count)
                         if combo_key in seen_combos:
                             continue
@@ -723,69 +968,21 @@ def evaluate(data: dict) -> dict:
                                 "green": green_count,
                                 "white": white_count,
                                 "wg_total": candidate_wg_total,
-                                "ranges": {
-                                    "blue": blue_range,
-                                    "purple": purple_range,
-                                    "gold": gold_range,
-                                    "red": red_range,
-                                },
+                                "ranges": {"blue": blue_range, "purple": purple_range, "gold": gold_range, "red": red_range},
                                 "total_grid_range": (total_grid_low, total_grid_high),
                             }
                         )
 
-    for color in ("blue", "purple", "gold", "red"):
-        solved[color]["counts"] = uniq_sorted(solved[color]["counts"])
-        solved[color]["warns"] = sorted(set(solved[color]["warns"]))
-        solved[color]["pair_map"] = {count: uniq_sorted(grids) for count, grids in solved[color]["pair_map"].items()}
-
+    solved = normalize_solved(solved)
     warns = sorted(set(warns))
     combos.sort(key=lambda combo: (*compare_combo_key(combo), combo["wg_total"]))
     if not combos:
         return {"errors": ["当前约束拼不出有效组合"], "warns": warns, "solved": solved}
 
     weighted = weighted_stats(dict(data.get("category_weights", {})))
-    estimates = [{"combo": combo, "est": estimate_combo(combo, weighted, grid_prices)} for combo in combos]
-
-    floor_price = min(item["est"]["exact_floor"] for item in estimates)
-    conservative_floor = min(item["est"]["conservative_floor"] for item in estimates)
-    avg_price = (
-        min(item["est"]["item_exact"] for item in estimates)
-        + min(item["est"]["grid_exact_min"] for item in estimates)
-        + min(item["est"]["item_scene"] for item in estimates)
-        + min(item["est"]["grid_scene_min"] for item in estimates)
-    ) / 4.0
-
-    raw_burst = max(item["est"]["raw_aggressive_ceiling"] for item in estimates)
-    burst_price = max(avg_price, min(raw_burst, avg_price * 1.30))
-    recommended_cap = floor_price + (burst_price - floor_price) * round_rule["pace"]
-    possible_low_price = min(item["est"]["possible_low_price"] for item in estimates)
-    possible_high_price = max(item["est"]["possible_high_price"] for item in estimates)
-
-    combo_low_values = [item["est"]["exact_floor"] for item in estimates]
-    combo_high_values = [min(item["est"]["raw_aggressive_ceiling"], avg_price * 1.30) for item in estimates]
-    spread = max(0.0, percentile(combo_high_values, 0.9) - percentile(combo_low_values, 0.1))
-    spread_ratio = spread / max(avg_price, 1.0)
-    count_term = min(45.0, math.log2(len(combos) + 1) * 6.5)
-    uncertainty = min(100.0, count_term + spread_ratio * 35.0)
+    estimates = [{"combo": combo, "est": estimate_combo(combo, weighted, price_info)} for combo in combos]
     wg_candidates = uniq_sorted(combo["wg_total"] for combo in combos)
-    total_grid_candidates = uniq_sorted([combo["total_grid_range"][0] for combo in combos] + [combo["total_grid_range"][1] for combo in combos])
-
-    summary = {
-        "combo_count": len(combos),
-        "conservative_floor": conservative_floor,
-        "floor_price": floor_price,
-        "avg_price": avg_price,
-        "burst_price": burst_price,
-        "recommended_cap": recommended_cap,
-        "possible_low_price": possible_low_price,
-        "possible_high_price": possible_high_price,
-        "uncertainty": uncertainty,
-        "round_rule": round_rule["label"],
-        "avg_tolerance": avg_tolerance,
-        "wg_candidates": wg_candidates,
-        "total_grid_candidates": total_grid_candidates,
-        "grid_prices": grid_prices,
-    }
+    summary = build_summary(data, estimates, combos, round_rule, avg_tolerance, grid_prices)
 
     return {
         "errors": [],
@@ -793,10 +990,9 @@ def evaluate(data: dict) -> dict:
         "summary": summary,
         "solved": solved,
         "combos_preview": combos[:max_show],
-        "aggression": compute_aggression(data, summary),
         "info_suggestions": compute_info_suggestions(data, solved, len(combos)),
-        "auto_fields_now": fields_known_by_role(normalize_role(data.get("my_role", "none")), round_no),
-        "role_label": ROLE_LABELS[normalize_role(data.get("my_role", "none"))],
+        "auto_fields_now": fields_known_by_role(role, round_no),
+        "role_label": ROLE_LABELS[role],
         "resolved_wg_total": wg_candidates[0] if len(wg_candidates) == 1 else None,
     }
 
@@ -813,7 +1009,6 @@ def render_report(data: dict, result: dict) -> str:
 
     summary = result["summary"]
     solved = result["solved"]
-    aggression = result["aggression"]
 
     lines = []
     lines.append("竞拍之王手动判断报告")
@@ -825,9 +1020,10 @@ def render_report(data: dict, result: dict) -> str:
     lines.append(f"- 可能最高: {format_w(summary['possible_high_price'])}")
     lines.append(f"- 保守保底: {format_w(summary['conservative_floor'])}")
     lines.append(f"- 精确底价: {format_w(summary['floor_price'])}")
-    lines.append(f"- 平均参考: {format_w(summary['avg_price'])}")
-    lines.append(f"- 爆发上限: {format_w(summary['burst_price'])}")
-    lines.append(f"- 本回合建议上限: {format_w(summary['recommended_cap'])}")
+    lines.append(f"- 平均价格（各估计方式平均）: {format_w(summary['avg_price'])}")
+    lines.append(f"- 保守出价（不低于保底）: {format_w(summary['conservative_bid_price'])}")
+    lines.append(f"- 均衡出价: {format_w(summary['balanced_bid_price'])}")
+    lines.append(f"- 激进出价（平均 +25%）: {format_w(summary['aggressive_bid_price'])}")
     lines.append(
         "- 单格物价: "
         f"绿{summary['grid_prices']['green']:.2f} "
@@ -850,12 +1046,6 @@ def render_report(data: dict, result: dict) -> str:
     lines.append(f"- 橙色件数: {build_count_text(solved['gold']['counts'])}")
     red_values = uniq_sorted(combo["red"] for combo in result["combos_preview"])
     lines.append(f"- 红色件数预览: {build_count_text(red_values)}")
-    lines.append("")
-    lines.append("策略判断")
-    lines.append(f"- 模式: {aggression['mode']}")
-    lines.append(f"- 建议: {aggression['action']}")
-    for reason in aggression["reasons"]:
-        lines.append(f"- {reason}")
     lines.append("")
     lines.append("角色当前已知信息")
     if result["auto_fields_now"]:

@@ -61,15 +61,15 @@
   },
   "advisor": {
     "round": 1,
-    "role": "ahmed",
-    "green_count": 0,
-    "white_count": 0,
+    "role": "ahmad",
+    "green_count": null,
+    "white_count": null,
     "avg_grid_all": null,
     "total_grid_rounding": "round",
     "price_config_path": "price_config.json"
   },
   "pricing": {
-    "source": "recommended_cap",
+    "source": "avg_price",
     "computed_price_unit": "w",
     "computed_price_multiplier": 10000,
     "rounding": "floor_int",
@@ -84,6 +84,7 @@
     "default_map": "4",
     "default_runs": 1,
     "unknown_escape_cooldown_seconds": 2.0,
+    "post_confirm_escape_block_seconds": 30.0,
     "maps": {
       "1": {
         "name": "快递盲盒堆",
@@ -142,8 +143,9 @@
         }
       }
     },
-    "selected_map": "4",
-    "selected_runs": 1
+    "selected_map": "5",
+    "selected_runs": 5,
+    "selected_risk": "激进"
   },
   "timing": {
     "poll_seconds": 0.5,

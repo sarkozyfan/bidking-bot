@@ -168,11 +168,11 @@ def resolve_path(config_path: Path, raw_path: str | None, default_name: str) -> 
 def default_advisor_input() -> dict[str, Any]:
     return {
         "round": 1,
-        "my_role": "ahmed",
+        "my_role": "ahmad",
         "total_all": 30,
         "avg_grid_all": None,
-        "count_green": 0,
-        "count_white": 0,
+        "count_green": None,
+        "count_white": None,
         "min_count_green": 0,
         "min_count_white": 0,
         "max_count": 60,
@@ -227,11 +227,13 @@ def build_advisor_input(config: dict[str, Any], text: str, round_no: int, price_
     data = default_advisor_input()
     data = apply_price_config(data, price_config)
     data["round"] = int(round_no)
-    data["my_role"] = advisor.get("role", "ahmed")
+    data["my_role"] = advisor.get("role", "ahmad")
     data["avg_grid_all"] = advisor.get("avg_grid_all")
     data["total_grid_rounding"] = advisor.get("total_grid_rounding", "round")
-    data["count_green"] = int(advisor.get("green_count", 0))
-    data["count_white"] = int(advisor.get("white_count", 0))
+    green_count = advisor.get("green_count")
+    white_count = advisor.get("white_count")
+    data["count_green"] = None if green_count in (None, "") else int(green_count)
+    data["count_white"] = None if white_count in (None, "") else int(white_count)
     merged = merge_patch(data, parsed)
     merged["round"] = int(round_no)
     return merged, parsed
@@ -271,11 +273,13 @@ def build_advisor_input_from_patch(config: dict[str, Any], parsed_patch: dict[st
     data = default_advisor_input()
     data = apply_price_config(data, price_config)
     data["round"] = int(round_no)
-    data["my_role"] = advisor.get("role", "ahmed")
+    data["my_role"] = advisor.get("role", "ahmad")
     data["avg_grid_all"] = advisor.get("avg_grid_all")
     data["total_grid_rounding"] = advisor.get("total_grid_rounding", "round")
-    data["count_green"] = int(advisor.get("green_count", 0))
-    data["count_white"] = int(advisor.get("white_count", 0))
+    green_count = advisor.get("green_count")
+    white_count = advisor.get("white_count")
+    data["count_green"] = None if green_count in (None, "") else int(green_count)
+    data["count_white"] = None if white_count in (None, "") else int(white_count)
     merged = merge_patch(data, parsed_patch)
     merged["round"] = int(round_no)
     return merged
@@ -634,7 +638,7 @@ def input_bid(config: dict[str, Any], price: int) -> None:
     sleep_interruptible(float(config.get("timing", {}).get("after_bid_confirm_wait_seconds", 1.0)))
 
 
-def run_post_round_transition(config: dict[str, Any]) -> None:
+def run_post_round_transition(config: dict[str, Any]) -> float:
     log("post-round transition: fixed click chain")
     click_point(config, "end_reward_click", repeat=2)
     sleep_interruptible(1.0)
@@ -650,7 +654,9 @@ def run_auction_lobby_transition(config: dict[str, Any]) -> None:
     click_point(config, "post_continue_action")
     sleep_interruptible(2.0)
     click_point(config, "post_continue_confirm")
+    confirm_at = time.monotonic()
     log("auction lobby transition complete; waiting for round OCR")
+    return confirm_at
 
 
 def run_home_bid_button_transition(config: dict[str, Any]) -> None:
@@ -672,14 +678,14 @@ def current_map_point(config: dict[str, Any], selected_map: str) -> dict[str, An
     return point if isinstance(point, dict) else None
 
 
-def run_map_selection_transition(config: dict[str, Any], selected_map: str) -> None:
+def run_map_selection_transition(config: dict[str, Any], selected_map: str) -> float | None:
     maps = config.get("automation", {}).get("maps", {})
     item = maps.get(str(selected_map), {})
     name = str(item.get("name") or selected_map)
     point = current_map_point(config, selected_map)
     if not point:
         log(f"map selection skipped: no point configured for {selected_map}.{name}")
-        return
+        return None
     log(f"auction lobby detected: select map {selected_map}.{name}")
     bring_window_to_front(config)
     sleep_interruptible(1.0)
@@ -690,7 +696,9 @@ def run_map_selection_transition(config: dict[str, Any], selected_map: str) -> N
     sleep_interruptible(float(config.get("timing", {}).get("click_pause_seconds", 0.12)))
     sleep_interruptible(2.0)
     click_point(config, "post_continue_confirm")
+    confirm_at = time.monotonic()
     log("map selection transition complete; waiting for round OCR")
+    return confirm_at
 
 
 def choose_rounding(value: float, rounding: str) -> int:
@@ -701,22 +709,32 @@ def choose_rounding(value: float, rounding: str) -> int:
     return int(math.floor(value))
 
 
-def apply_risk_mode_cap(config: dict[str, Any], result: dict[str, Any], computed_price: int, rounding: str) -> tuple[int, str]:
-    selected_risk = str(config.get("automation", {}).get("selected_risk", "均衡")).strip()
-    risk_factor_map = {
-        "保守": 1.20,
-        "均衡": 1.40,
-        "激进": 1.60,
-    }
-    factor = float(risk_factor_map.get(selected_risk, 1.40))
+def apply_observed_low_price_floor(result: dict[str, Any], price: int, rounding: str) -> tuple[int, str | None]:
     summary = (result or {}).get("summary") or {}
-    avg_price = summary.get("avg_price")
-    if avg_price is None:
-        return computed_price, f"risk={selected_risk} no avg_price"
-    multiplier = int(config.get("pricing", {}).get("computed_price_multiplier", 10000))
-    risk_cap = choose_rounding(float(avg_price) * factor * multiplier, rounding)
-    final_price = min(int(computed_price), int(risk_cap))
-    return final_price, f"risk={selected_risk} avg_cap={risk_cap}"
+    observed_low_price = summary.get("observed_low_price")
+    if observed_low_price is None:
+        return int(price), None
+    try:
+        observed_low_price = float(observed_low_price)
+    except Exception:
+        return int(price), None
+    if observed_low_price <= 0:
+        return int(price), None
+    if observed_low_price > float(price):
+        raised = choose_rounding(observed_low_price * 1.25, rounding)
+        return int(max(price, raised)), f"observed_low_price={observed_low_price:.0f} -> raised={raised}"
+    return int(price), None
+
+
+def choose_bid_value_by_mode(config: dict[str, Any], result: dict[str, Any]) -> tuple[float | None, str]:
+    selected_risk = str(config.get("automation", {}).get("selected_risk", "均衡")).strip()
+    summary = (result or {}).get("summary") or {}
+    if selected_risk in ("保守", "conservative", "floor_price"):
+        return summary.get("floor_price"), "保守=floor_price"
+    if selected_risk in ("激进", "aggressive", "avg_price_plus_25"):
+        avg_price = summary.get("avg_price")
+        return (float(avg_price) * 1.25 if avg_price is not None else None), "激进=avg_price*1.25"
+    return summary.get("avg_price"), "均衡=avg_price"
 
 
 def compute_bid_price(
@@ -727,7 +745,6 @@ def compute_bid_price(
 ) -> tuple[int, dict[str, Any]]:
     pricing = config.get("pricing", {})
     fallback = int(pricing.get("fallback_bid_price", 22223))
-    source = str(pricing.get("source", "recommended_cap"))
     min_facts = int(pricing.get("min_useful_facts", 1))
     multiplier = int(pricing.get("computed_price_multiplier", 10000))
     rounding = str(pricing.get("rounding", "floor_int"))
@@ -757,13 +774,13 @@ def compute_bid_price(
         payload["reason"] = "; ".join(str(item) for item in errors)
         return fallback, payload
 
-    try:
-        value = float(result["summary"][source])
-    except Exception as exc:
+    value, source_reason = choose_bid_value_by_mode(config, result)
+    if value is None:
         payload["fallback"] = True
-        payload["reason"] = f"missing summary source {source}: {exc}"
+        payload["reason"] = f"missing bid value: {source_reason}"
         return fallback, payload
 
+    value = float(value)
     payload["source_value"] = value
     if value <= 0:
         payload["fallback"] = True
@@ -775,8 +792,11 @@ def compute_bid_price(
         payload["fallback"] = True
         payload["reason"] = f"non-positive final price: {price}"
         return fallback, payload
-    final_price, risk_reason = apply_risk_mode_cap(config, result, price, rounding)
-    payload["reason"] = f"{source}={value:.4f}w * {multiplier} -> input={price}; {risk_reason}; final={final_price}"
+    final_price, low_price_reason = apply_observed_low_price_floor(result, price, rounding)
+    if low_price_reason:
+        payload["reason"] = f"{source_reason}: {value:.4f}w * {multiplier} -> input={price}; {low_price_reason}; final={final_price}"
+    else:
+        payload["reason"] = f"{source_reason}: {value:.4f}w * {multiplier} -> input={final_price}"
     return int(final_price), payload
 
 
@@ -876,14 +896,14 @@ def handle_end_transition(
     last_end_at: float,
     transition_debounce: float,
     source: str,
-) -> float:
+) -> tuple[float, float]:
     if time.monotonic() - last_end_at < transition_debounce:
         log(f"{source}: end prompt ignored by debounce")
-        return last_end_at
+        return last_end_at, 0.0
     log(f"{source}: end prompt detected")
-    run_post_round_transition(config)
+    confirm_at = run_post_round_transition(config)
     handled_rounds.clear()
-    return time.monotonic()
+    return time.monotonic(), confirm_at
 
 
 def run_loop(config_path: Path) -> None:
@@ -906,10 +926,12 @@ def run_loop(config_path: Path) -> None:
     last_home_bid_at = 0.0
     last_reward_continue_at = 0.0
     last_unknown_escape_at = 0.0
+    last_post_continue_confirm_at = 0.0
     poll_seconds = float(config.get("timing", {}).get("poll_seconds", 1.0))
     transition_debounce = float(config.get("timing", {}).get("transition_debounce_seconds", 8.0))
     reward_continue_debounce = float(config.get("timing", {}).get("reward_continue_debounce_seconds", 1.0))
     unknown_escape_cooldown = float(config.get("automation", {}).get("unknown_escape_cooldown_seconds", 2.0))
+    post_confirm_escape_block_seconds = float(config.get("automation", {}).get("post_confirm_escape_block_seconds", 30.0))
     loop_index = 0
 
     while True:
@@ -927,7 +949,13 @@ def run_loop(config_path: Path) -> None:
             )
 
             if not observation.has_any_signal:
-                if time.monotonic() - last_unknown_escape_at >= unknown_escape_cooldown:
+                since_post_confirm = time.monotonic() - last_post_continue_confirm_at
+                if since_post_confirm < post_confirm_escape_block_seconds:
+                    log(
+                        f"loop {loop_index}: no signal, esc blocked after post_continue_confirm "
+                        f"({since_post_confirm:.1f}/{post_confirm_escape_block_seconds:.1f}s)"
+                    )
+                elif time.monotonic() - last_unknown_escape_at >= unknown_escape_cooldown:
                     press_escape(config)
                     last_unknown_escape_at = time.monotonic()
                 else:
@@ -936,13 +964,15 @@ def run_loop(config_path: Path) -> None:
                 continue
 
             if observation.end_prompt:
-                last_end_at = handle_end_transition(
+                last_end_at, confirm_at = handle_end_transition(
                     config,
                     handled_rounds,
                     last_end_at,
                     transition_debounce,
                     f"loop {loop_index}",
                 )
+                if confirm_at:
+                    last_post_continue_confirm_at = confirm_at
                 completed_runs += 1
                 knowledge_patch = None
                 log(f"completed runs: {completed_runs}/{max_runs}")
@@ -964,7 +994,9 @@ def run_loop(config_path: Path) -> None:
 
             if observation.auction_lobby:
                 if time.monotonic() - last_lobby_at >= transition_debounce:
-                    run_map_selection_transition(config, selected_map)
+                    confirm_at = run_map_selection_transition(config, selected_map)
+                    if confirm_at:
+                        last_post_continue_confirm_at = confirm_at
                     handled_rounds.clear()
                     knowledge_patch = None
                     last_lobby_at = time.monotonic()
@@ -1013,13 +1045,15 @@ def run_loop(config_path: Path) -> None:
             log("stopped by GUI")
             return
         except EndPromptDetected as exc:
-            last_end_at = handle_end_transition(
+            last_end_at, confirm_at = handle_end_transition(
                 config,
                 handled_rounds,
                 last_end_at,
                 transition_debounce,
                 f"active handling ({exc.source})",
             )
+            if confirm_at:
+                last_post_continue_confirm_at = confirm_at
             completed_runs += 1
             knowledge_patch = None
             log(f"completed runs: {completed_runs}/{max_runs}")

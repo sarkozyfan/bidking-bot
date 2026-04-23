@@ -20,6 +20,9 @@ COLOR_ALIASES = {
     "橙": "gold",
     "橙色": "gold",
     "橙色品质": "gold",
+    "金": "gold",
+    "金色": "gold",
+    "金色品质": "gold",
     "黄": "gold",
     "黄色": "gold",
     "黄色品质": "gold",
@@ -36,11 +39,12 @@ COLOR_ALIASES = {
 
 
 def color_pattern() -> str:
-    return r"(蓝色品质|紫色品质|橙色品质|黄色品质|红色品质|绿色品质|白色品质|蓝色|紫色|橙色|黄色|红色|绿色|白色|蓝|紫|橙|黄|红|绿|白)"
+    return r"(蓝色品质|紫色品质|橙色品质|金色品质|黄色品质|红色品质|绿色品质|白色品质|蓝色|紫色|橙色|金色|黄色|红色|绿色|白色|蓝|紫|橙|金|黄|红|绿|白)"
 
 
 def empty_constraints() -> dict[str, dict[str, Any]]:
     return {
+        "wg": {"avg": None, "count": None, "grid": None, "min_count": None},
         "blue": {"avg": None, "count": None, "grid": None, "min_count": None},
         "purple": {"avg": None, "count": None, "grid": None, "min_count": None},
         "gold": {"avg": None, "count": None, "grid": None, "min_count": None},
@@ -96,6 +100,10 @@ def color_name(raw: str) -> str:
     return COLOR_ALIASES[raw]
 
 
+def has_wg_phrase(line: str) -> bool:
+    return any(token in line for token in ("白色和绿色", "绿色和白色", "白绿", "白+绿"))
+
+
 def parse_total_all(line: str) -> int | None:
     patterns = [
         r"总藏品数量为(\d+)件",
@@ -109,11 +117,26 @@ def parse_total_all(line: str) -> int | None:
     return None
 
 
+def parse_victor_total_all(line: str) -> int | None:
+    patterns = [
+        r"本次竞拍共有品质紫色[、,]金色[、,]红色藏品(\d+)件",
+        r"本次竞拍共有品质紫色[、,]橙色[、,]红色藏品(\d+)件",
+        r"共有品质紫色[、,]金色[、,]红色藏品(\d+)件",
+        r"共有品质紫色[、,]橙色[、,]红色藏品(\d+)件",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line)
+        if match:
+            return int(match.group(1))
+    return None
+
+
 def parse_total_grid(line: str) -> int | None:
     patterns = [
         r"所有藏品总格子数量为(\d+)格",
-        r"总格子数量为(\d+)格",
         r"全部总格子数量为(\d+)格",
+        r"总藏品总格子数量为(\d+)格",
+        r"本次竞拍(?:的)?总藏品总格子数量为(\d+)格",
     ]
     for pattern in patterns:
         match = re.search(pattern, line)
@@ -150,6 +173,67 @@ def parse_green_white_total(line: str) -> int | None:
     return None
 
 
+def parse_green_white_grid(line: str) -> int | None:
+    patterns = [
+        r"所有白色和绿色品质藏品总占位数为(\d+)格",
+        r"所有白色和绿色品质藏品总格数为(\d+)格",
+        r"所有白色和绿色品质藏品总格子数量为(\d+)格",
+        r"白色和绿色品质藏品总占位数为(\d+)格",
+        r"白色和绿色品质藏品总格数为(\d+)格",
+        r"白色和绿色品质藏品总格子数量为(\d+)格",
+        r"白绿总占位数为(\d+)格",
+        r"白绿总格数为(\d+)格",
+        r"白\+绿总格数为(\d+)格",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def parse_green_white_avg(line: str) -> float | None:
+    patterns = [
+        r"所有白色和绿色品质藏品平均格(?:子)?数(?:约为|为)?([\d,]+(?:\.\d+)?)(?:格)?",
+        r"白色和绿色品质藏品平均格(?:子)?数(?:约为|为)?([\d,]+(?:\.\d+)?)(?:格)?",
+        r"白绿平均格(?:子)?数(?:约为|为)?([\d,]+(?:\.\d+)?)(?:格)?",
+        r"白\+绿平均格(?:子)?数(?:约为|为)?([\d,]+(?:\.\d+)?)(?:格)?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line)
+        if match:
+            return maybe_int(normalize_number(match.group(1)))
+    return None
+
+
+def parse_green_white_avg_price(line: str) -> float | None:
+    patterns = [
+        r"所有白色和绿色品质藏品(?:的)?平均价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        r"白色和绿色品质藏品(?:的)?平均价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        r"白绿(?:的)?平均价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        r"白\+绿(?:的)?平均价值约(?:为)?([\d,]+(?:\.\d+)?)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line)
+        if match:
+            return normalize_number(match.group(1))
+    return None
+
+
+def parse_green_white_total_price(line: str) -> float | None:
+    patterns = [
+        r"所有白色和绿色品质藏品(?:的)?总价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        r"白色和绿色品质藏品(?:的)?总价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        r"白绿(?:的)?总价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        r"白\+绿(?:的)?总价值约(?:为)?([\d,]+(?:\.\d+)?)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line)
+        if match:
+            return normalize_number(match.group(1))
+    return None
+
+
 def parse_low_price(line: str) -> float | None:
     patterns = [
         r"当前预估最低价格[:：]?([\d,]+(?:\.\d+)?)",
@@ -171,6 +255,8 @@ def parse_round(line: str) -> int | None:
 
 
 def parse_color_count(line: str) -> tuple[str, int] | None:
+    if has_wg_phrase(line):
+        return None
     match = re.search(
         color_pattern() + r"(?:藏品)?(?:的)?(?:总数量|总件数|件数|数量)为(\d+)(?:件)?",
         line,
@@ -188,6 +274,8 @@ def parse_color_count(line: str) -> tuple[str, int] | None:
 
 
 def parse_color_grid(line: str) -> tuple[str, int] | None:
+    if has_wg_phrase(line):
+        return None
     match = re.search(
         color_pattern() + r"(?:藏品)?(?:的)?(?:总格子数量|总占用格子数量|占用的格子数量)为(\d+)(?:格)?",
         line,
@@ -198,12 +286,50 @@ def parse_color_grid(line: str) -> tuple[str, int] | None:
 
 
 def parse_color_avg(line: str) -> tuple[str, int | float] | None:
+    if has_wg_phrase(line):
+        return None
     match = re.search(
         color_pattern() + r"(?:藏品)?平均格(?:子)?数(?:约为|为)?([\d,]+(?:\.\d+)?)(?:格)?",
         line,
     )
     if match:
         return color_name(match.group(1)), maybe_int(normalize_number(match.group(2)))
+    return None
+
+
+def parse_color_avg_price(line: str) -> tuple[str, float] | None:
+    if has_wg_phrase(line):
+        return None
+    match = re.search(
+        r"所有" + color_pattern() + r"(?:藏品|品质藏品)?的?平均价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        line,
+    )
+    if match:
+        return color_name(match.group(1)), normalize_number(match.group(2))
+    match = re.search(
+        color_pattern() + r"(?:藏品|品质藏品)?(?:的)?平均价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        line,
+    )
+    if match:
+        return color_name(match.group(1)), normalize_number(match.group(2))
+    return None
+
+
+def parse_color_total_price(line: str) -> tuple[str, float] | None:
+    if has_wg_phrase(line):
+        return None
+    match = re.search(
+        r"所有" + color_pattern() + r"(?:藏品|品质藏品)?的?总价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        line,
+    )
+    if match:
+        return color_name(match.group(1)), normalize_number(match.group(2))
+    match = re.search(
+        color_pattern() + r"(?:藏品|品质藏品)?(?:的)?总价值约(?:为)?([\d,]+(?:\.\d+)?)",
+        line,
+    )
+    if match:
+        return color_name(match.group(1)), normalize_number(match.group(2))
     return None
 
 
@@ -238,6 +364,12 @@ def parse_central_info(text: str) -> dict[str, Any]:
             append_fact(result, "total_all", total_all, raw_line)
             parsed_any = True
 
+        victor_total_all = parse_victor_total_all(line)
+        if victor_total_all is not None:
+            result["victor_total_all"] = victor_total_all
+            append_fact(result, "victor_total_all", victor_total_all, raw_line)
+            parsed_any = True
+
         total_grid = parse_total_grid(line)
         if total_grid is not None:
             result["total_grid_all"] = total_grid
@@ -254,6 +386,30 @@ def parse_central_info(text: str) -> dict[str, Any]:
         if green_white_total is not None:
             result["wg_total"] = green_white_total
             append_fact(result, "wg_total", green_white_total, raw_line)
+            parsed_any = True
+
+        green_white_grid = parse_green_white_grid(line)
+        if green_white_grid is not None:
+            ensure_constraint(result, "wg")["grid"] = green_white_grid
+            append_fact(result, "constraints.wg.grid", green_white_grid, raw_line)
+            parsed_any = True
+
+        green_white_avg = parse_green_white_avg(line)
+        if green_white_avg is not None:
+            ensure_constraint(result, "wg")["avg"] = green_white_avg
+            append_fact(result, "constraints.wg.avg", green_white_avg, raw_line)
+            parsed_any = True
+
+        green_white_avg_price = parse_green_white_avg_price(line)
+        if green_white_avg_price is not None:
+            result["avg_price_wg"] = green_white_avg_price
+            append_fact(result, "avg_price_wg", green_white_avg_price, raw_line)
+            parsed_any = True
+
+        green_white_total_price = parse_green_white_total_price(line)
+        if green_white_total_price is not None:
+            result["total_price_wg"] = green_white_total_price
+            append_fact(result, "total_price_wg", green_white_total_price, raw_line)
             parsed_any = True
 
         low_price = parse_low_price(line)
@@ -296,6 +452,20 @@ def parse_central_info(text: str) -> dict[str, Any]:
                 ensure_constraint(result, color)["avg"] = value
                 field = f"constraints.{color}.avg"
             append_fact(result, field, value, raw_line)
+            parsed_any = True
+
+        color_avg_price = parse_color_avg_price(line)
+        if color_avg_price is not None:
+            color, value = color_avg_price
+            result[f"avg_price_{color}"] = value
+            append_fact(result, f"avg_price_{color}", value, raw_line)
+            parsed_any = True
+
+        color_total_price = parse_color_total_price(line)
+        if color_total_price is not None:
+            color, value = color_total_price
+            result[f"total_price_{color}"] = value
+            append_fact(result, f"total_price_{color}", value, raw_line)
             parsed_any = True
 
         generic_avg = parse_generic_avg(line)
