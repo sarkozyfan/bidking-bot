@@ -553,13 +553,21 @@ def save_round_debug_bundle(
     )
 
 
-def persist_last_submitted_price(config_path: Path, price: int | None) -> None:
+def persist_last_submitted_price(
+    config_path: Path,
+    price: int | None,
+    runtime_config: dict[str, Any] | None = None,
+) -> None:
+    normalized_price = None if price is None else int(price)
+    if runtime_config is not None:
+        runtime_config.setdefault("pricing", {})
+        runtime_config["pricing"]["last_submitted_price"] = normalized_price
     try:
         config = load_json(config_path)
     except Exception:
         return
     config.setdefault("pricing", {})
-    config["pricing"]["last_submitted_price"] = None if price is None else int(price)
+    config["pricing"]["last_submitted_price"] = normalized_price
     config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -1072,7 +1080,7 @@ def handle_round(
         log(f"bid skipped: {details.get('reason')}")
         return knowledge_patch
     input_bid(config, price)
-    persist_last_submitted_price(config_path, price)
+    persist_last_submitted_price(config_path, price, config)
     return knowledge_patch
 
 
@@ -1103,7 +1111,7 @@ def handle_end_transition(
 def run_loop(config_path: Path) -> None:
     config = load_json(config_path)
     price_config = load_price_config(config, config_path)
-    persist_last_submitted_price(config_path, None)
+    persist_last_submitted_price(config_path, None, config)
     selected_map = str(config.get("automation", {}).get("selected_map") or config.get("automation", {}).get("default_map", "4"))
     max_runs = int(config.get("automation", {}).get("selected_runs") or config.get("automation", {}).get("default_runs", 1))
     pyautogui.FAILSAFE = bool(config.get("safety", {}).get("failsafe", True))
@@ -1170,7 +1178,7 @@ def run_loop(config_path: Path) -> None:
                     last_post_continue_confirm_at = confirm_at
                 completed_runs += 1
                 knowledge_patch = None
-                persist_last_submitted_price(config_path, None)
+                persist_last_submitted_price(config_path, None, config)
                 log(f"completed runs: {completed_runs}/{max_runs}")
                 if completed_runs >= max_runs:
                     log("target runs reached; exit")
@@ -1195,7 +1203,7 @@ def run_loop(config_path: Path) -> None:
                         last_post_continue_confirm_at = confirm_at
                     handled_rounds.clear()
                     knowledge_patch = None
-                    persist_last_submitted_price(config_path, None)
+                    persist_last_submitted_price(config_path, None, config)
                     last_lobby_at = time.monotonic()
                 else:
                     log(f"loop {loop_index}: auction lobby ignored by debounce")
@@ -1206,7 +1214,7 @@ def run_loop(config_path: Path) -> None:
                 if time.monotonic() - last_home_bid_at >= transition_debounce:
                     run_home_bid_button_transition(config)
                     knowledge_patch = None
-                    persist_last_submitted_price(config_path, None)
+                    persist_last_submitted_price(config_path, None, config)
                     last_home_bid_at = time.monotonic()
                 else:
                     log(f"loop {loop_index}: home bid button ignored by debounce")
@@ -1222,7 +1230,7 @@ def run_loop(config_path: Path) -> None:
                 log("new auction inferred from round 1; reset handled rounds")
                 handled_rounds.clear()
                 knowledge_patch = apply_observation_memory(observation, None)
-                persist_last_submitted_price(config_path, None)
+                persist_last_submitted_price(config_path, None, config)
 
             if round_no in handled_rounds:
                 log(f"loop {loop_index}: round {round_no} already handled; waiting")
@@ -1255,7 +1263,7 @@ def run_loop(config_path: Path) -> None:
                 last_post_continue_confirm_at = confirm_at
             completed_runs += 1
             knowledge_patch = None
-            persist_last_submitted_price(config_path, None)
+            persist_last_submitted_price(config_path, None, config)
             log(f"completed runs: {completed_runs}/{max_runs}")
             if completed_runs >= max_runs:
                 log("target runs reached; exit")
