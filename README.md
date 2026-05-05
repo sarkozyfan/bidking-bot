@@ -1,4 +1,4 @@
-# BidKing Fresh Bot
+# BidKing Fresh Bot（项目已停止更新）
 
 `BidKing Fresh Bot` 是一个面向 Windows 桌面端《竞拍之王 / BidKing》的 OCR 识别与自动化工具。
 
